@@ -1,0 +1,130 @@
+# Crawford Launcher - Minecraft: Java Edition launcher for Android
+# Builds a rebranded APK from the open-source Amethyst launcher (LGPL-3.0).
+# Run it from the Actions tab, then download "CrawfordLauncher-APK".
+name: Build Crawford Launcher
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+env:
+  AMETHYST_COMMIT: 330c6eae3164df64bdc4828e946a9e62cc5169e4
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Get Amethyst source
+        uses: actions/checkout@v4
+        with:
+          repository: AngelAuraMC/Amethyst-Android
+          ref: ${{ env.AMETHYST_COMMIT }}
+          submodules: recursive
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Get Java 8 runtime for Android
+        uses: dawidd6/action-download-artifact@v9
+        with:
+          workflow: build.yml
+          path: app_pojavlauncher/src/main/assets/components/jre
+          workflow_conclusion: completed
+          repo: AngelAuraMC/angelauramc-openjdk-build
+          branch: buildjre8
+          name: jre8-pojav
+
+      - name: Apply Crawford branding (name, app id, color)
+        run: |
+          A=app_pojavlauncher
+          sed -i 's/org\.angelauramc\.amethyst/com.crawford.launcher/g; s/"Amethyst (Debug)"/"Crawford Launcher"/g; s/"Amethyst"/"Crawford Launcher"/g; s/amethyst-legacy-/crawford-/' $A/build.gradle
+          sed -i 's/Angel Aura Amethyst/Crawford Launcher/g; s/Amethyst/Crawford Launcher/g' $A/src/main/res/values*/strings.xml
+          sed -i 's/#9649b8/#2EBD6B/' $A/src/main/res/values/colors.xml
+          sed -i "s/rootProject.name='Amethyst'/rootProject.name='CrawfordLauncher'/" settings.gradle
+          grep -n "applicationId" $A/build.gradle
+
+      - name: Draw Crawford icons
+        run: |
+          pip install pillow
+          cat > /tmp/icons.py <<'PYEOF'
+          from PIL import Image, ImageDraw
+          import random
+          BG1=(18,32,26); BG2=(10,18,15)
+          GREENS=[(46,189,107),(38,163,92),(56,209,122),(30,140,78)]
+          C = ["..#####.",
+               ".#######",
+               "###....#",
+               "##......",
+               "##......",
+               "###....#",
+               ".#######",
+               "..#####."]
+          def background(S):
+              im=Image.new("RGBA",(S,S))
+              d=ImageDraw.Draw(im)
+              n=12; c=S/n; r=random.Random(7)
+              for y in range(n):
+                  for x in range(n):
+                      t=(x+y)/(2*n-2)
+                      col=tuple(int(BG1[i]*(1-t)+BG2[i]*t) for i in range(3))
+                      j=r.randint(-3,3); col=tuple(max(0,v+j) for v in col)
+                      d.rectangle([x*c,y*c,(x+1)*c,(y+1)*c],fill=col+(255,))
+              return im
+          def letter(S, scale=0.42):
+              im=Image.new("RGBA",(S,S),(0,0,0,0)); d=ImageDraw.Draw(im)
+              size=S*scale; cell=size/8; ox=(S-size)/2; oy=(S-size)/2
+              r=random.Random(3)
+              # shadow
+              for y,row in enumerate(C):
+                  for x,ch in enumerate(row):
+                      if ch=='#':
+                          sx=ox+x*cell+cell*0.25; sy=oy+y*cell+cell*0.25
+                          d.rectangle([sx,sy,sx+cell,sy+cell],fill=(0,0,0,110))
+              for y,row in enumerate(C):
+                  for x,ch in enumerate(row):
+                      if ch=='#':
+                          col=r.choice(GREENS); x0=ox+x*cell; y0=oy+y*cell
+                          d.rectangle([x0,y0,x0+cell-1,y0+cell-1],fill=col+(255,))
+                          hl=max(1,int(cell*0.14))
+                          d.rectangle([x0,y0,x0+cell-1,y0+hl],fill=tuple(min(255,v+40) for v in col)+(255,))
+                          d.rectangle([x0,y0+cell-hl,x0+cell-1,y0+cell-1],fill=tuple(int(v*0.7) for v in col)+(255,))
+              return im
+          res="app_pojavlauncher/src/main/res"
+          dens={'mdpi':1,'hdpi':1.5,'xhdpi':2,'xxhdpi':3,'xxxhdpi':4}
+          for k,m in dens.items():
+              A=int(108*m); L=int(48*m)
+              background(A).save(f"{res}/mipmap-{k}/ic_launcher_background.webp","WEBP",lossless=True)
+              letter(A).save(f"{res}/mipmap-{k}/ic_launcher_foreground.webp","WEBP",lossless=True)
+              big=Image.alpha_composite(background(L*4),letter(L*4,0.62))
+              mask=Image.new("L",(L*4,L*4),0); ImageDraw.Draw(mask).rounded_rectangle([0,0,L*4-1,L*4-1],radius=L*0.8,fill=255)
+              sq=Image.new("RGBA",(L*4,L*4),(0,0,0,0)); sq.paste(big,(0,0),mask)
+              sq.resize((L,L),Image.LANCZOS).save(f"{res}/mipmap-{k}/ic_launcher.webp","WEBP",lossless=True)
+              cm=Image.new("L",(L*4,L*4),0); ImageDraw.Draw(cm).ellipse([0,0,L*4-1,L*4-1],fill=255)
+              rd=Image.new("RGBA",(L*4,L*4),(0,0,0,0)); rd.paste(big,(0,0),cm)
+              rd.resize((L,L),Image.LANCZOS).save(f"{res}/mipmap-{k}/ic_launcher_round.webp","WEBP",lossless=True)
+          full=Image.alpha_composite(background(1024),letter(1024,0.62))
+          full.save(f"{res}/drawable/ic_pojav_full.webp","WEBP",lossless=True)
+          PYEOF
+          python3 /tmp/icons.py
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+          gradle-version: "9.6.1"
+
+      - name: Build APK
+        run: |
+          ./scripts/languagelist_updater.sh
+          gradle :app_pojavlauncher:assembleDebug
+          mkdir -p out
+          mv app_pojavlauncher/build/outputs/apk/debug/app_pojavlauncher-debug.apk out/CrawfordLauncher.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrawfordLauncher-APK
+          path: out/CrawfordLauncher.apk
