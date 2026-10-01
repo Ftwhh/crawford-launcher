@@ -1,6 +1,5 @@
 # Crawford Launcher - Minecraft: Java Edition launcher for Android
-# Builds a rebranded APK from the open-source Amethyst launcher (LGPL-3.0).
-# Run it from the Actions tab, then download "CrawfordLauncher-APK".
+# Builds a rebranded APK with local account UI & local logins fully unlocked.
 name: Build Crawford Launcher
 
 on:
@@ -29,15 +28,6 @@ jobs:
         with:
           path: crawford-repo
 
-      - name: Unlock Local Accounts in Amethyst
-        run: |
-          A=app_pojavlauncher
-          # Enable offline/local account flags across the source
-          grep -rl "isLocalAccountAllowed" $A/src/ | xargs -r sed -i 's/isLocalAccountAllowed = false/isLocalAccountAllowed = true/g' || true
-          grep -rl "isLocalAccountAllowed" $A/src/ | xargs -r sed -i 's/return false;/return true;/g' || true
-          grep -rl "isMicrosoftOnly" $A/src/ | xargs -r sed -i 's/isMicrosoftOnly = true/isMicrosoftOnly = false/g' || true
-          grep -rl "LOCAL_ACCOUNT_ALLOWED" $A/src/ | xargs -r sed -i 's/LOCAL_ACCOUNT_ALLOWED = false/LOCAL_ACCOUNT_ALLOWED = true/g' || true
-
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -54,30 +44,74 @@ jobs:
           branch: buildjre8
           name: jre8-pojav
 
-      - name: Apply Crawford branding (name, app id, color)
+      - name: Apply Crawford branding
         run: |
           A=app_pojavlauncher
           sed -i 's/org\.angelauramc\.amethyst/com.crawford.launcher/g; s/"Amethyst (Debug)"/"Crawford Launcher"/g; s/"Amethyst"/"Crawford Launcher"/g; s/amethyst-legacy-/crawford-/' $A/build.gradle
           sed -i 's/Angel Aura Amethyst/Crawford Launcher/g; s/Amethyst/Crawford Launcher/g' $A/src/main/res/values*/strings.xml
           sed -i 's/#9649b8/#2EBD6B/' $A/src/main/res/values/colors.xml
           sed -i "s/rootProject.name='Amethyst'/rootProject.name='CrawfordLauncher'/" settings.gradle
-          grep -n "applicationId" $A/build.gradle
 
-      - name: Add Crawford accounts (email sign-in) & Patch Restrictions
+      - name: Add Crawford accounts & Bruteforce Offline Bypass
         run: |
           unzip -q -o crawford-repo/crawford-addon.zip -d /tmp/crawford-addon
           python3 /tmp/crawford-addon/apply_crawford.py
           if [ -z "$CRAWFORD_SUPABASE_URL" ] || [ -z "$CRAWFORD_SUPABASE_KEY" ]; then
-            echo "::warning::CRAWFORD_SUPABASE_URL / CRAWFORD_SUPABASE_KEY secrets are not set - Crawford sign-in will be disabled in this APK"
+            echo "::warning::CRAWFORD_SUPABASE_URL / CRAWFORD_SUPABASE_KEY secrets are not set."
           fi
-
-          A=app_pojavlauncher
-          # Neutralize account ownership checks added by the Crawford add-on
-          find $A/src/main/java -type f \( -name "Crawford*.java" -o -name "Crawford*.kt" \) -exec sed -i 's/hasMinecraftJavaEdition()/true/g' {} + || true
-          find $A/src/main/java -type f \( -name "Crawford*.java" -o -name "Crawford*.kt" \) -exec sed -i 's/return false;/return true;/g' {} + || true
-          find $A/src/main/java -type f -exec sed -i 's/showNoMinecraftAccountDialog()/performLocalLogin()/g' {} + || true
-
           rm -rf crawford-repo
+          
+          # Bruteforce python script to neuter both Amethyst UI hiding and Crawford logic blocks
+          cat > bypass.py << 'EOF'
+          import os
+          import re
+
+          for root, _, files in os.walk('app_pojavlauncher/src'):
+              for file in files:
+                  path = os.path.join(root, file)
+                  try:
+                      with open(path, 'r', encoding='utf-8') as f:
+                          c = f.read()
+                  except: continue
+                  
+                  orig = c
+                  
+                  if file.endswith('.xml'):
+                      # Unhide all UI elements (brings back standard offline button)
+                      c = c.replace('android:visibility="gone"', 'android:visibility="visible"')
+                      c = c.replace('android:visibility="invisible"', 'android:visibility="visible"')
+                  elif file.endswith(('.java', '.kt')):
+                      # Force offline flags on
+                      c = c.replace('isLocalAccountAllowed = false', 'isLocalAccountAllowed = true')
+                      c = c.replace('isMicrosoftOnly = true', 'isMicrosoftOnly = false')
+                      c = c.replace('LOCAL_ACCOUNT_ALLOWED = false', 'LOCAL_ACCOUNT_ALLOWED = true')
+                      
+                      # Stop the app from hiding the offline button programmatically
+                      c = c.replace('.setVisibility(View.GONE)', '.setVisibility(View.VISIBLE)')
+                      c = c.replace('.setVisibility(View.INVISIBLE)', '.setVisibility(View.VISIBLE)')
+                      
+                      # Bypass ownership checks
+                      c = re.sub(r'hasMinecraft[A-Za-z0-9_]*\(\)', 'true', c)
+                      c = re.sub(r'ownsMinecraft[A-Za-z0-9_]*\(\)', 'true', c)
+                      
+                      # Obliterate the specific Crawford Microsoft check dialog & its return block
+                      if "No Minecraft Account Found" in c:
+                          lines = c.split('\n')
+                          for i in range(len(lines)):
+                              if "No Minecraft Account Found" in lines[i] or "This feature requires a Microsoft account" in lines[i]:
+                                  lines[i] = '// ' + lines[i]
+                                  # Look ahead up to 7 lines for 'return' statements that abort login and comment them out
+                                  for j in range(1, 8):
+                                      if i+j < len(lines) and 'return' in lines[i+j]:
+                                          lines[i+j] = '// ' + lines[i+j]
+                          c = '\n'.join(lines)
+                  
+                  if orig != c:
+                      with open(path, 'w', encoding='utf-8') as f:
+                          f.write(c)
+                      print(f"Patched {path} for offline bypass")
+          EOF
+          python3 bypass.py
 
       - name: Draw Crawford icons
         run: |
@@ -116,15 +150,15 @@ jobs:
                       if ch=='#':
                           sx=ox+x*cell+cell*0.25; sy=oy+y*cell+cell*0.25
                           d.rectangle([sx,sy,sx+cell,sy+cell],fill=(0,0,0,110))
-              for y,row in enumerate(C):
-                  for x,ch in enumerate(row):
-                      if ch=='#':
-                          col=r.choice(GREENS); x0=ox+x*cell; y0=oy+y*cell
-                          d.rectangle([x0,y0,x0+cell-1,y0+cell-1],fill=col+(255,))
-                          hl=max(1,int(cell*0.14))
-                          d.rectangle([x0,y0,x0+cell-1,y0+hl],fill=tuple(min(255,v+40) for v in col)+(255,))
-                          d.rectangle([x0,y0+cell-hl,x0+cell-1,y0+cell-1],fill=tuple(int(v*0.7) for v in col)+(255,))
-              return im
+          for y,row in enumerate(C):
+              for x,ch in enumerate(row):
+                  if ch=='#':
+                      col=r.choice(GREENS); x0=ox+x*cell; y0=oy+y*cell
+                      d.rectangle([x0,y0,x0+cell-1,y0+cell-1],fill=col+(255,))
+                      hl=max(1,int(cell*0.14))
+                      d.rectangle([x0,y0,x0+cell-1,y0+hl],fill=tuple(min(255,v+40) for v in col)+(255,))
+                      d.rectangle([x0,y0+cell-hl,x0+cell-1,y0+cell-1],fill=tuple(int(v*0.7) for v in col)+(255,))
+          return im
           res="app_pojavlauncher/src/main/res"
           dens={'mdpi':1,'hdpi':1.5,'xhdpi':2,'xxhdpi':3,'xxxhdpi':4}
           for k,m in dens.items():
