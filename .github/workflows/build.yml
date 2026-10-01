@@ -1,5 +1,5 @@
 # Crawford Launcher - Minecraft: Java Edition launcher for Android
-# Builds a rebranded APK from Amethyst with local account support enabled.
+# Builds a rebranded APK with local account support enabled.
 name: Build Crawford Launcher
 
 on:
@@ -31,7 +31,7 @@ jobs:
       - name: Unlock Offline / Local Account Mode
         run: |
           A=app_pojavlauncher
-          # Enable offline login and remove Microsoft-only restrictions across the source files
+          # Enable offline login and remove Microsoft-only restrictions across the base source files
           grep -rl "isLocalAccountAllowed" $A/src/ | xargs -r sed -i 's/isLocalAccountAllowed = false/isLocalAccountAllowed = true/g' || true
           grep -rl "isLocalAccountAllowed" $A/src/ | xargs -r sed -i 's/return false;/return true;/g' || true
           grep -rl "isMicrosoftOnly" $A/src/ | xargs -r sed -i 's/isMicrosoftOnly = true/isMicrosoftOnly = false/g' || true
@@ -62,13 +62,19 @@ jobs:
           sed -i "s/rootProject.name='Amethyst'/rootProject.name='CrawfordLauncher'/" settings.gradle
           grep -n "applicationId" $A/build.gradle
 
-      - name: Add Crawford check
+      - name: Add Crawford check & patch ownership dialog
         run: |
           unzip -q -o crawford-repo/crawford-addon.zip -d /tmp/crawford-addon
           python3 /tmp/crawford-addon/apply_crawford.py
           if [ -z "$CRAWFORD_SUPABASE_URL" ] || [ -z "$CRAWFORD_SUPABASE_KEY" ]; then
             echo "::warning::CRAWFORD_SUPABASE_URL / CRAWFORD_SUPABASE_KEY secrets are not set - the Crawford check will be disabled in this APK"
           fi
+          
+          # Force Crawford account ownership checks to always evaluate to true
+          A=app_pojavlauncher
+          find $A/src/main/java -type f \( -name "Crawford*.java" -o -name "Crawford*.kt" \) -exec sed -i 's/hasMinecraftJavaEdition()/true/g' {} + || true
+          find $A/src/main/java -type f \( -name "Crawford*.java" -o -name "Crawford*.kt" \) -exec sed -i 's/return false;/return true;/g' {} + || true
+          
           rm -rf crawford-repo
 
       - name: Draw Crawford icons
