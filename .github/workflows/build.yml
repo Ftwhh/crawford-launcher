@@ -23,11 +23,18 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Patch Amethyst for Offline Mode
+        run: |
+          chmod +x android-build.sh
+          # Run the patch phase only (disables building via the script so Gradle handles it)
+          sed -i '/\.\/gradlew/d' android-build.sh
+          ./android-build.sh || true
+
       - name: Get Java 8 runtime for Android
         uses: dawidd6/action-download-artifact@v9
         with:
           workflow: build.yml
-          path: app_pojavlauncher/src/main/assets/components/jre
+          path: Amethyst-Android/app_pojavlauncher/src/main/assets/components/jre
           workflow_conclusion: completed
           repo: AngelAuraMC/angelauramc-openjdk-build
           branch: buildjre8
@@ -35,11 +42,11 @@ jobs:
 
       - name: Apply Crawford branding (name, app id, color)
         run: |
-          A=app_pojavlauncher
+          A=Amethyst-Android/app_pojavlauncher
           sed -i 's/org\.angelauramc\.amethyst/com.crawford.launcher/g; s/"Amethyst (Debug)"/"Crawford Launcher"/g; s/"Amethyst"/"Crawford Launcher"/g; s/amethyst-legacy-/crawford-/' $A/build.gradle
           sed -i 's/Angel Aura Amethyst/Crawford Launcher/g; s/Amethyst/Crawford Launcher/g' $A/src/main/res/values*/strings.xml
           sed -i 's/#9649b8/#2EBD6B/' $A/src/main/res/values/colors.xml
-          sed -i "s/rootProject.name='Amethyst'/rootProject.name='CrawfordLauncher'/" settings.gradle
+          sed -i "s/rootProject.name='Amethyst'/rootProject.name='CrawfordLauncher'/" Amethyst-Android/settings.gradle
           grep -n "applicationId" $A/build.gradle
 
       - name: Draw Crawford icons
@@ -88,7 +95,7 @@ jobs:
                           d.rectangle([x0,y0,x0+cell-1,y0+hl],fill=tuple(min(255,v+40) for v in col)+(255,))
                           d.rectangle([x0,y0+cell-hl,x0+cell-1,y0+cell-1],fill=tuple(int(v*0.7) for v in col)+(255,))
               return im
-          res="app_pojavlauncher/src/main/res"
+          res="Amethyst-Android/app_pojavlauncher/src/main/res"
           dens={'mdpi':1,'hdpi':1.5,'xhdpi':2,'xxhdpi':3,'xxxhdpi':4}
           for k,m in dens.items():
               A=int(108*m); L=int(48*m)
@@ -113,10 +120,12 @@ jobs:
 
       - name: Build APK
         run: |
-          ./scripts/languagelist_updater.sh
+          cd Amethyst-Android
+          ./scripts/languagelist_updater.sh || true
           gradle :app_pojavlauncher:assembleDebug
+          cd ..
           mkdir -p out
-          mv app_pojavlauncher/build/outputs/apk/debug/app_pojavlauncher-debug.apk out/CrawfordLauncher.apk
+          mv Amethyst-Android/app_pojavlauncher/build/outputs/apk/debug/app_pojavlauncher-debug.apk out/CrawfordLauncher.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
