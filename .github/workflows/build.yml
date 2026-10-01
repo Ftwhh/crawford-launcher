@@ -1,5 +1,5 @@
 # Crawford Launcher - Minecraft: Java Edition launcher for Android
-# Builds a rebranded APK with local account support enabled.
+# Builds a rebranded APK with local account UI & local logins fully unlocked.
 name: Build Crawford Launcher
 
 on:
@@ -28,14 +28,18 @@ jobs:
         with:
           path: crawford-repo
 
-      - name: Unlock Offline / Local Account Mode
+      - name: Unlock Offline / Local Account Mode & Force Local Account UI
         run: |
           A=app_pojavlauncher
-          # Enable offline login and remove Microsoft-only restrictions across the base source files
+          # 1. Enable local account backend flags
           grep -rl "isLocalAccountAllowed" $A/src/ | xargs -r sed -i 's/isLocalAccountAllowed = false/isLocalAccountAllowed = true/g' || true
           grep -rl "isLocalAccountAllowed" $A/src/ | xargs -r sed -i 's/return false;/return true;/g' || true
           grep -rl "isMicrosoftOnly" $A/src/ | xargs -r sed -i 's/isMicrosoftOnly = true/isMicrosoftOnly = false/g' || true
           grep -rl "LOCAL_ACCOUNT_ALLOWED" $A/src/ | xargs -r sed -i 's/LOCAL_ACCOUNT_ALLOWED = false/LOCAL_ACCOUNT_ALLOWED = true/g' || true
+
+          # 2. Force Local Account button / interface to be visible in layout files
+          find $A/src/main/res/layout* -type f -name "*.xml" -exec sed -i 's/android:visibility="gone"/android:visibility="visible"/g' {} + || true
+          find $A/src/main/res/layout* -type f -name "*.xml" -exec sed -i 's/android:visibility="invisible"/android:visibility="visible"/g' {} + || true
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -62,7 +66,7 @@ jobs:
           sed -i "s/rootProject.name='Amethyst'/rootProject.name='CrawfordLauncher'/" settings.gradle
           grep -n "applicationId" $A/build.gradle
 
-      - name: Add Crawford check & patch ownership dialog
+      - name: Add Crawford check & Patch Ownership Checks
         run: |
           unzip -q -o crawford-repo/crawford-addon.zip -d /tmp/crawford-addon
           python3 /tmp/crawford-addon/apply_crawford.py
@@ -70,10 +74,13 @@ jobs:
             echo "::warning::CRAWFORD_SUPABASE_URL / CRAWFORD_SUPABASE_KEY secrets are not set - the Crawford check will be disabled in this APK"
           fi
           
-          # Force Crawford account ownership checks to always evaluate to true
           A=app_pojavlauncher
+          # Force all injected Crawford checks to treat accounts as valid Minecraft owners
           find $A/src/main/java -type f \( -name "Crawford*.java" -o -name "Crawford*.kt" \) -exec sed -i 's/hasMinecraftJavaEdition()/true/g' {} + || true
           find $A/src/main/java -type f \( -name "Crawford*.java" -o -name "Crawford*.kt" \) -exec sed -i 's/return false;/return true;/g' {} + || true
+
+          # Override hardcoded dialog prompts in Crawford add-on Java files
+          find $A/src/main/java -type f -exec sed -i 's/showNoMinecraftAccountDialog()/performLocalLogin()/g' {} + || true
           
           rm -rf crawford-repo
 
