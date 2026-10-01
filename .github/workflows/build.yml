@@ -61,7 +61,6 @@ jobs:
           fi
           rm -rf crawford-repo
           
-          # Bruteforce python script to neuter both Amethyst UI hiding and Crawford logic blocks
           cat > bypass.py << 'EOF'
           import os
           import re
@@ -77,30 +76,24 @@ jobs:
                   orig = c
                   
                   if file.endswith('.xml'):
-                      # Unhide all UI elements (brings back standard offline button)
                       c = c.replace('android:visibility="gone"', 'android:visibility="visible"')
                       c = c.replace('android:visibility="invisible"', 'android:visibility="visible"')
                   elif file.endswith(('.java', '.kt')):
-                      # Force offline flags on
                       c = c.replace('isLocalAccountAllowed = false', 'isLocalAccountAllowed = true')
                       c = c.replace('isMicrosoftOnly = true', 'isMicrosoftOnly = false')
                       c = c.replace('LOCAL_ACCOUNT_ALLOWED = false', 'LOCAL_ACCOUNT_ALLOWED = true')
                       
-                      # Stop the app from hiding the offline button programmatically
                       c = c.replace('.setVisibility(View.GONE)', '.setVisibility(View.VISIBLE)')
                       c = c.replace('.setVisibility(View.INVISIBLE)', '.setVisibility(View.VISIBLE)')
                       
-                      # Bypass ownership checks
                       c = re.sub(r'hasMinecraft[A-Za-z0-9_]*\(\)', 'true', c)
                       c = re.sub(r'ownsMinecraft[A-Za-z0-9_]*\(\)', 'true', c)
                       
-                      # Obliterate the specific Crawford Microsoft check dialog & its return block
                       if "No Minecraft Account Found" in c:
                           lines = c.split('\n')
                           for i in range(len(lines)):
                               if "No Minecraft Account Found" in lines[i] or "This feature requires a Microsoft account" in lines[i]:
                                   lines[i] = '// ' + lines[i]
-                                  # Look ahead up to 7 lines for 'return' statements that abort login and comment them out
                                   for j in range(1, 8):
                                       if i+j < len(lines) and 'return' in lines[i+j]:
                                           lines[i+j] = '// ' + lines[i+j]
@@ -144,21 +137,20 @@ jobs:
               im=Image.new("RGBA",(S,S),(0,0,0,0)); d=ImageDraw.Draw(im)
               size=S*scale; cell=size/8; ox=(S-size)/2; oy=(S-size)/2
               r=random.Random(3)
-              # shadow
               for y,row in enumerate(C):
                   for x,ch in enumerate(row):
                       if ch=='#':
                           sx=ox+x*cell+cell*0.25; sy=oy+y*cell+cell*0.25
                           d.rectangle([sx,sy,sx+cell,sy+cell],fill=(0,0,0,110))
-          for y,row in enumerate(C):
-              for x,ch in enumerate(row):
-                  if ch=='#':
-                      col=r.choice(GREENS); x0=ox+x*cell; y0=oy+y*cell
-                      d.rectangle([x0,y0,x0+cell-1,y0+cell-1],fill=col+(255,))
-                      hl=max(1,int(cell*0.14))
-                      d.rectangle([x0,y0,x0+cell-1,y0+hl],fill=tuple(min(255,v+40) for v in col)+(255,))
-                      d.rectangle([x0,y0+cell-hl,x0+cell-1,y0+cell-1],fill=tuple(int(v*0.7) for v in col)+(255,))
-          return im
+              for y,row in enumerate(C):
+                  for x,ch in enumerate(row):
+                      if ch=='#':
+                          col=r.choice(GREENS); x0=ox+x*cell; y0=oy+y*cell
+                          d.rectangle([x0,y0,x0+cell-1,y0+cell-1],fill=col+(255,))
+                          hl=max(1,int(cell*0.14))
+                          d.rectangle([x0,y0,x0+cell-1,y0+hl],fill=tuple(min(255,v+40) for v in col)+(255,))
+                          d.rectangle([x0,y0+cell-hl,x0+cell-1,y0+cell-1],fill=tuple(int(v*0.7) for v in col)+(255,))
+              return im
           res="app_pojavlauncher/src/main/res"
           dens={'mdpi':1,'hdpi':1.5,'xhdpi':2,'xxhdpi':3,'xxxhdpi':4}
           for k,m in dens.items():
