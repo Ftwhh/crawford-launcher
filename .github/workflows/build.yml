@@ -1,5 +1,5 @@
 # Crawford Launcher - Minecraft: Java Edition launcher for Android
-# Builds a rebranded APK with local account UI & local logins fully unlocked.
+# Unlocks local/offline account creation without requiring a Microsoft account.
 name: Build Crawford Launcher
 
 on:
@@ -52,7 +52,7 @@ jobs:
           sed -i 's/#9649b8/#2EBD6B/' $A/src/main/res/values/colors.xml
           sed -i "s/rootProject.name='Amethyst'/rootProject.name='CrawfordLauncher'/" settings.gradle
 
-      - name: Add Crawford accounts & Bruteforce Offline Bypass
+      - name: Add Crawford accounts & Patch Microsoft Account Requirement
         run: |
           unzip -q -o crawford-repo/crawford-addon.zip -d /tmp/crawford-addon
           python3 /tmp/crawford-addon/apply_crawford.py
@@ -61,6 +61,7 @@ jobs:
           fi
           rm -rf crawford-repo
           
+          # Python script to strip the Microsoft account requirement check before local login
           cat > bypass.py << 'EOF'
           import os
           import re
@@ -68,41 +69,51 @@ jobs:
           for root, _, files in os.walk('app_pojavlauncher/src'):
               for file in files:
                   path = os.path.join(root, file)
+                  if not file.endswith(('.java', '.kt', '.xml')):
+                      continue
+
                   try:
-                      with open(path, 'r', encoding='utf-8') as f:
+                      with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                           c = f.read()
-                  except: continue
-                  
+                  except:
+                      continue
+
                   orig = c
-                  
+
                   if file.endswith('.xml'):
                       c = c.replace('android:visibility="gone"', 'android:visibility="visible"')
                       c = c.replace('android:visibility="invisible"', 'android:visibility="visible"')
+
                   elif file.endswith(('.java', '.kt')):
+                      # 1. Override boolean checks across Amethyst & Crawford fragments
+                      c = re.sub(r'boolean\s+isLocalAccountAllowed\s*\(\s*\)\s*\{[^}]*\}', 'boolean isLocalAccountAllowed() { return true; }', c)
+                      c = re.sub(r'boolean\s+hasMicrosoftAccount\s*\(\s*\)\s*\{[^}]*\}', 'boolean hasMicrosoftAccount() { return true; }', c)
+                      c = re.sub(r'boolean\s+hasMinecraft\w*\s*\(\s*\)\s*\{[^}]*\}', 'boolean hasMinecraft() { return true; }', c)
+
                       c = c.replace('isLocalAccountAllowed = false', 'isLocalAccountAllowed = true')
                       c = c.replace('isMicrosoftOnly = true', 'isMicrosoftOnly = false')
                       c = c.replace('LOCAL_ACCOUNT_ALLOWED = false', 'LOCAL_ACCOUNT_ALLOWED = true')
-                      
-                      c = c.replace('.setVisibility(View.GONE)', '.setVisibility(View.VISIBLE)')
-                      c = c.replace('.setVisibility(View.INVISIBLE)', '.setVisibility(View.VISIBLE)')
-                      
-                      c = re.sub(r'hasMinecraft[A-Za-z0-9_]*\(\)', 'true', c)
-                      c = re.sub(r'ownsMinecraft[A-Za-z0-9_]*\(\)', 'true', c)
-                      
-                      if "No Minecraft Account Found" in c:
+
+                      # 2. Bypass conditional logic requiring a Microsoft login before adding local accounts
+                      c = re.sub(r'if\s*\(\s*!.*hasMicrosoftAccount\w*\(\)\s*\)', 'if (false)', c)
+                      c = re.sub(r'if\s*\(\s*!.*isLocalAccountAllowed\w*\(\)\s*\)', 'if (false)', c)
+                      c = re.sub(r'if\s*\(\s*!.*hasMinecraft\w*\(\)\s*\)', 'if (false)', c)
+
+                      # 3. Comment out any popup dialogs blocking offline account creation
+                      if "No Minecraft Account Found" in c or "Microsoft account required" in c:
                           lines = c.split('\n')
                           for i in range(len(lines)):
-                              if "No Minecraft Account Found" in lines[i] or "This feature requires a Microsoft account" in lines[i]:
+                              if "No Minecraft Account Found" in lines[i] or "Microsoft account required" in lines[i]:
                                   lines[i] = '// ' + lines[i]
                                   for j in range(1, 8):
                                       if i+j < len(lines) and 'return' in lines[i+j]:
                                           lines[i+j] = '// ' + lines[i+j]
                           c = '\n'.join(lines)
-                  
+
                   if orig != c:
                       with open(path, 'w', encoding='utf-8') as f:
                           f.write(c)
-                      print(f"Patched {path} for offline bypass")
+                      print(f"Patched: {path}")
           EOF
           python3 bypass.py
 
